@@ -36,16 +36,66 @@ object Solver {
 
   case class Step(op: ArithmeticOperation, left: Int, right: Int) {
     override def toString = left + " " + op + " " + right + " = " + op.compute(left, right).getOrElse(":-/")
+    def compute:Option[Int] = op.compute(left, right)
+  }
+  object Step{
+    def getValidStep(o: ArithmeticOperation, o1:Int, o2:Int):Option[Step] = 
+      // Note : we rely on the fact that o.isCommutative => always o.compute.isDefined
+      // and not commutative implies that only 1 possible combination is defined to simplify this logic
+      if(o.isCommutative)
+        Some(Step(o,o1,o2))
+      else if(o.compute(o1,o2).isDefined)
+          Some(Step(o,o1,o2))
+      else if(o.compute(o2,o1).isDefined)
+          Some(Step(o,o2,o1))
+      else None
   }
 
-  case class Numbers(numbers: List[Int]) {
-    def remove(indexes: Int*) =
-      Numbers(numbers.zipWithIndex.filter(num => (!indexes.contains(num._2))).map(_._1))
+  case class MultiSet[T] (val map : Map[T,Int]){
+      def contains(n:T):Boolean = map contains n
+      def get(n:T):Int = map getOrElse (n,0)
+      def remove(n:T):MultiSet[T] = {
+        val e = map get n
+        e match {
+          case None => MultiSet(map)
+          case e:Some[Int] if(e.get==1) => MultiSet(map - n)
+          case e:Some[Int] if(e.get>0) => MultiSet(map updated (n, e.get-1))
+        }
+      }
+      def add(n:T):MultiSet[T] = MultiSet(map updated (n,map.getOrElse(n,0)+1))
+      def ::(n:T) = add(n)
+      def getPairs:List[(T,T)] = {
+         def rec(l:List[T],acc:List[(T,T)]):List[(T,T)] = l match {
+           case List() => acc
+           case head::tail => {
+            val subList = tail.map((head,_))
+            if(map.get(head).get>=2)
+              /* The reason why we can't use the Scala .combinations function
+               * over list without a trick such as 
+               * map.flatMap(x => {if (x._2>=2) List(x._1,x._1) else List(x._1)}).toList */
+              rec(tail,((head,head)::subList)++acc)
+            else
+              rec(tail,subList++acc)
+           }
+         }
+         rec(map.keys.toList,List())
+      }
+      def mkString(sep:String):String = map.flatMap(x => List.fill(x._2)(x._1)).mkString(sep)
+  }
+  
+  object MultiSet{
+     def apply[T](l:List[T]):MultiSet[T] = l match {
+       case List()=>MultiSet(Map[T,Int]())
+        case head::tail => MultiSet(tail).add(head) 
+      }
+  }
+  
+  case class Numbers(numbers: MultiSet[Int]) {
+    
+    def remove(n: Int,m:Int) = Numbers(numbers.remove(n).remove(m))
 
     def ::(number: Int) = Numbers(number :: numbers)
-
-    def length = numbers.length
-    def apply(i: Int) = numbers(i)
+    def pairs = numbers.getPairs
     def contains(i: Int) = numbers contains (i)
     override def toString = "("+numbers.mkString(",")+")"  
   }
@@ -60,25 +110,22 @@ object Solver {
   def apply(initialNumbers: List[Int], goal: Int) = new Solver(initialNumbers, goal)
   
   class Solver(initialNumbers: List[Int], goal: Int) {
-
     def from(paths: Set[Path]): Stream[Set[Path]] = {
       if (paths.isEmpty) Stream.empty
       else {
         val more = for {
           path <- paths
-          i <- 0 until path.finalNumbers.length; n_i = path.finalNumbers(i)
-          j <- 0 until path.finalNumbers.length if i != j; n_j = path.finalNumbers(j)
+          (l,r) <- path.finalNumbers.pairs
           op <- operations
-          if (op.compute(n_i, n_j)).isDefined // The proposed operation has a natural result
-          if (!op.isCommutative || j < i) //if op is commutative, then op(a,b) = op(b,a), we only need to consider it once
+          s<-Step.getValidStep(op,l,r)
         } yield path extend (
-          Step(op, n_i, n_j),
-          (op.compute(n_i, n_j)).get :: (path.finalNumbers remove (i, j)))
+          s,
+          (s.compute).get :: (path.finalNumbers remove (l,r)))
         paths #:: from(more)
       }
     }
 
-    val initialPath = new Path(Nil, Numbers(initialNumbers))
+    val initialPath = new Path(Nil, Numbers(MultiSet(initialNumbers)))
     val pathSets = from(Set(initialPath))
 
     def solve: Stream[Path] = {

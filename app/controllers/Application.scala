@@ -47,7 +47,8 @@ class Application @Inject() (db: neo4j) extends Controller {
     }
   }
   
-  def uploadAsGraph(goal: Int, values: List[Int]) = Action {
+  def uploadAsGraph(goal: Int, valuesStr: String) = Action {
+    val values=valuesStr.split("/").map(x => x.toInt).toList
     val solver = Solver(values, goal)
     val pathsStream = solver.pathSets
     for {
